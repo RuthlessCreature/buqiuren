@@ -28,6 +28,10 @@ jobs:
         with:
           node-version: '22'
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -47,14 +51,10 @@ jobs:
             exit 1
           fi
 
-      - name: Install build tools
-        run: npm install --global wrangler@latest
-
-      - name: Vendor pinned bazi engine
-        run: bash scripts/vendor_bazi.sh
-
-      - name: Install Python dependencies
-        run: uv sync --all-groups
+      - name: Install build tools and project environment
+        run: |
+          npm install --global wrangler@latest
+          uv sync --all-groups
 
       - name: Resolve or create D1 database
         id: d1
@@ -73,6 +73,14 @@ jobs:
           cp wrangler.toml.example wrangler.toml
           sed -i "s/__D1_DATABASE_ID__/$DB_ID/g" wrangler.toml
           echo "database_id=$DB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Worker-compatible Python packages
+        run: uv run pywrangler sync
+
+      - name: Vendor pinned bazi engine after package sync
+        run: |
+          bash scripts/vendor_bazi.sh
+          test "$(cat python_modules/buqiuren_bazi/UPSTREAM_COMMIT)" = "33b18354d5407727640e545c3aaec0efb4bf5282"
 
       - name: Ensure private R2 media bucket
         shell: bash
@@ -100,4 +108,26 @@ jobs:
           printf '%s' "$SESSION_PEPPER" | wrangler secret put SESSION_PEPPER --config wrangler.toml
 
       - name: Deploy Python Worker
-        run: uv run pywrangler deploy --config wrangler.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run pywrangler deploy --config wrangler.toml | tee deploy.log
+
+      - name: Smoke-test deployed Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' deploy.log | tail -1 || true)"
+          if [ -z "$URL" ]; then
+            echo "Could not determine workers.dev URL from deployment output" >&2
+            cat deploy.log
+            exit 1
+          fi
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$URL/health" | tee health.json
+          python - <<'PY'
+          import json
+          d=json.load(open('health.json'))
+          assert d['ok'] is True
+          assert d['bazi_engine_commit']=='33b18354d5407727640e545c3aaec0efb4bf5282'
+          print('Smoke test OK:', d)
+          PY
