@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -49,20 +50,39 @@ def profile_fingerprint(profile: ProfileInput) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _vendor_dir() -> Path:
+def _local_vendor_dir() -> Path:
     configured = os.environ.get("BAZI_VENDOR_DIR")
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parent.parent / "vendor_bazi"
+    return Path(__file__).resolve().parent.parent / "python_modules" / "buqiuren_bazi"
+
+
+def _ensure_bazi_importable() -> None:
+    """Expose the vendored upstream directory in ordinary CPython tests.
+
+    Cloudflare processes `python_modules/buqiuren_bazi.pth` at Worker startup, so
+    deployed Workers already have this directory on sys.path. Local pytest does
+    not process that project-local .pth file, therefore we add the physical path
+    only when it exists.
+    """
+    vendor = _local_vendor_dir()
+    if vendor.is_dir() and str(vendor) not in sys.path:
+        sys.path.insert(0, str(vendor))
+    if importlib.util.find_spec("bazi") is None:
+        raise RuntimeError(
+            "固定版本 china-testing/bazi 未打包；先运行 `uv run pywrangler sync`，再运行 scripts/vendor_bazi.sh"
+        )
 
 
 def _run_upstream(profile: ProfileInput, hour: int) -> str:
-    vendor = _vendor_dir()
-    script = vendor / "bazi.py"
-    if not script.exists():
-        raise RuntimeError("bazi 上游代码未打包；请先运行 scripts/vendor_bazi.sh")
-
-    argv = [str(script), str(profile.birth_year), str(profile.birth_month), str(profile.birth_day), str(hour)]
+    _ensure_bazi_importable()
+    argv = [
+        "bazi.py",
+        str(profile.birth_year),
+        str(profile.birth_month),
+        str(profile.birth_day),
+        str(hour),
+    ]
     if profile.calendar_type == "solar":
         argv.append("-g")
     elif profile.leap_month:
@@ -71,27 +91,19 @@ def _run_upstream(profile: ProfileInput, hour: int) -> str:
         argv.append("-n")
 
     previous_argv = sys.argv[:]
-    inserted = False
-    vendor_str = str(vendor)
-    if vendor_str not in sys.path:
-        sys.path.insert(0, vendor_str)
-        inserted = True
-
     buffer = io.StringIO()
     try:
         sys.argv = argv
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
-            runpy.run_path(str(script), run_name="__main__")
+            # Execute the upstream module itself. We do not copy/reimplement its
+            # chart logic; python_modules + .pth makes its original absolute
+            # sibling imports (datas/sizi/common/yue/...) resolve unchanged.
+            runpy.run_module("bazi", run_name="__main__", alter_sys=False)
     except SystemExit as exc:
         if exc.code not in (None, 0):
             raise RuntimeError(f"bazi 排盘失败，退出码 {exc.code}: {buffer.getvalue()[-1000:]}") from exc
     finally:
         sys.argv = previous_argv
-        if inserted:
-            try:
-                sys.path.remove(vendor_str)
-            except ValueError:
-                pass
 
     output = ANSI_RE.sub("", buffer.getvalue()).strip()
     if not output:
