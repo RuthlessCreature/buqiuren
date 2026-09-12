@@ -14,7 +14,7 @@ from typing import Any
 
 BAZI_ENGINE_COMMIT = "33b18354d5407727640e545c3aaec0efb4bf5282"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-PILLARS_RE = re.compile(r"lunar_python:\s*([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
+PILLARS_RE = re.compile(r"(?:lunar_python:|四柱：)\s*([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
 
 
 @dataclass(frozen=True)
@@ -62,13 +62,7 @@ def _run_upstream(profile: ProfileInput, hour: int) -> str:
     if not script.exists():
         raise RuntimeError("bazi 上游代码未打包；请先运行 scripts/vendor_bazi.sh")
 
-    argv = [
-        str(script),
-        str(profile.birth_year),
-        str(profile.birth_month),
-        str(profile.birth_day),
-        str(hour),
-    ]
+    argv = [str(script), str(profile.birth_year), str(profile.birth_month), str(profile.birth_day), str(hour)]
     if profile.calendar_type == "solar":
         argv.append("-g")
     elif profile.leap_month:
@@ -137,39 +131,40 @@ def build_chart(profile: ProfileInput) -> dict[str, Any]:
         if profile.birth_hour is None or not 0 <= profile.birth_hour <= 23:
             raise ValueError("已知时辰时，小时必须为 0–23")
         raw = _run_upstream(profile, profile.birth_hour)
+        pillars = _pillars(raw)
+        if len(pillars) != 4:
+            raise RuntimeError("无法从固定版本 bazi 输出中识别四柱；拒绝由模型补算")
         return {
             **base,
             "mode": "four_pillars",
-            "pillars": _pillars(raw),
+            "pillars": pillars,
             "raw_output": raw,
             "method_note": "四柱及后续关系均直接来自固定版本 china-testing/bazi 的运行输出。",
         }
 
     candidates: list[dict[str, Any]] = []
-    # Representative civil hours for 子、丑、寅...亥。23:00 also belongs to 子时,
-    # but using 00:00 avoids crossing the user's civil date when the date itself is fixed.
     representative_hours = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]
     branches = list("子丑寅卯辰巳午未申酉戌亥")
     for branch, hour in zip(branches, representative_hours):
         raw = _run_upstream(profile, hour)
+        pillars = _pillars(raw)
+        if len(pillars) != 4:
+            raise RuntimeError(f"无法识别{branch}时候选四柱；拒绝由模型补算")
         candidates.append(
             {
                 "shichen": branch,
                 "representative_hour": hour,
-                "pillars": _pillars(raw),
-                # Keep enough upstream evidence for cross-candidate comparison without
-                # exploding every chat request. Full reports can be regenerated.
+                "pillars": pillars,
                 "upstream_excerpt": raw[:9000],
             }
         )
 
     invariant = []
-    candidate_pillars = [c["pillars"] for c in candidates if len(c["pillars"]) == 4]
-    if candidate_pillars:
-        for i in range(3):
-            values = {p[i] for p in candidate_pillars}
-            if len(values) == 1:
-                invariant.append(next(iter(values)))
+    candidate_pillars = [c["pillars"] for c in candidates]
+    for i in range(3):
+        values = {p[i] for p in candidate_pillars}
+        if len(values) == 1:
+            invariant.append(next(iter(values)))
 
     return {
         **base,
