@@ -1,0 +1,97 @@
+name: Deploy Cloudflare Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      SESSION_PEPPER: ${{ secrets.SESSION_PEPPER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID MINIMAX_API_KEY ADMIN_PASSWORD SESSION_PEPPER; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing Actions secret: $name" >&2
+              exit 1
+            fi
+          done
+          if [ "${#SESSION_PEPPER}" -lt 32 ]; then
+            echo "SESSION_PEPPER must be at least 32 characters" >&2
+            exit 1
+          fi
+
+      - name: Install build tools
+        run: npm install --global wrangler@latest
+
+      - name: Vendor pinned bazi engine
+        run: bash scripts/vendor_bazi.sh
+
+      - name: Install Python dependencies
+        run: uv sync --all-groups
+
+      - name: Resolve or create D1 database
+        id: d1
+        shell: bash
+        run: |
+          set -euo pipefail
+          DB_ID="$(wrangler d1 list --json | python -c 'import json,sys; xs=json.load(sys.stdin); print(next((x.get("uuid") or x.get("id") or "" for x in xs if x.get("name")=="buqiuren-db"), ""))')"
+          if [ -z "$DB_ID" ]; then
+            wrangler d1 create buqiuren-db --location apac
+            DB_ID="$(wrangler d1 list --json | python -c 'import json,sys; xs=json.load(sys.stdin); print(next((x.get("uuid") or x.get("id") or "" for x in xs if x.get("name")=="buqiuren-db"), ""))')"
+          fi
+          if [ -z "$DB_ID" ]; then
+            echo "Unable to resolve buqiuren-db database id" >&2
+            exit 1
+          fi
+          cp wrangler.toml.example wrangler.toml
+          sed -i "s/__D1_DATABASE_ID__/$DB_ID/g" wrangler.toml
+          echo "database_id=$DB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure private R2 media bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! out="$(wrangler r2 bucket create buqiuren-media 2>&1)"; then
+            if ! printf '%s' "$out" | grep -Eqi 'already exists|already owned'; then
+              printf '%s\n' "$out" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Apply D1 migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'y\n' | wrangler d1 migrations apply buqiuren-db --remote --config wrangler.toml
+
+      - name: Configure Worker secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$MINIMAX_API_KEY" | wrangler secret put MINIMAX_API_KEY --config wrangler.toml
+          printf '%s' "$ADMIN_PASSWORD" | wrangler secret put ADMIN_PASSWORD --config wrangler.toml
+          printf '%s' "$SESSION_PEPPER" | wrangler secret put SESSION_PEPPER --config wrangler.toml
+
+      - name: Deploy Python Worker
+        run: uv run pywrangler deploy --config wrangler.toml
