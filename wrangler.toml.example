@@ -18,5 +18,9 @@ database_name = "buqiuren-db"
 database_id = "__D1_DATABASE_ID__"
 migrations_dir = "migrations"
 
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "buqiuren-media"
+
 [python_modules]
 excludes = ["**/*.pyc", "**/__pycache__", "vendor_bazi/books/**", "vendor_bazi/examples/**", "vendor_bazi/手相/**"]
