@@ -123,7 +123,20 @@ jobs:
             cat deploy.log
             exit 1
           fi
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$URL/health" | tee health.json
+          rm -f health.json
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error "$URL/health" -o health.json; then
+              break
+            fi
+            echo "Health endpoint not ready yet (attempt $attempt/12); retrying..."
+            rm -f health.json
+            sleep 5
+          done
+          if [ ! -s health.json ]; then
+            echo "Health endpoint did not become ready after deployment" >&2
+            exit 1
+          fi
+          cat health.json
           python - <<'PY'
           import json
           d=json.load(open('health.json'))
