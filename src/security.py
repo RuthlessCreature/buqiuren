@@ -5,7 +5,7 @@ import re
 import secrets
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{3,32}$")
-PBKDF2_ITERATIONS = 180_000
+PBKDF2_ITERATIONS = 60_000
 
 
 def validate_username(username: str) -> str:
@@ -26,12 +26,37 @@ def _material(password: str, pepper: str) -> bytes:
     return (password + "\x00" + pepper).encode("utf-8")
 
 
+def _pbkdf2_sha256(password_material: bytes, salt: bytes, iterations: int, dklen: int = 32) -> bytes:
+    """PBKDF2-HMAC-SHA256 with a pure-Python fallback for Pyodide/Workers.
+
+    Cloudflare Python Workers run on Pyodide, where OpenSSL-backed hashlib helpers
+    can be unavailable. We prefer CPython's optimized implementation whenever it
+    exists and fall back to the RFC 8018 construction using hmac+sha256.
+    """
+    try:
+        fn = getattr(hashlib, "pbkdf2_hmac")
+        return fn("sha256", password_material, salt, iterations, dklen=dklen)
+    except (AttributeError, NotImplementedError, RuntimeError):
+        pass
+
+    hlen = hashlib.sha256().digest_size
+    blocks = (dklen + hlen - 1) // hlen
+    derived = bytearray()
+    for block_index in range(1, blocks + 1):
+        u = hmac.new(password_material, salt + block_index.to_bytes(4, "big"), hashlib.sha256).digest()
+        acc = bytearray(u)
+        for _ in range(1, iterations):
+            u = hmac.new(password_material, u, hashlib.sha256).digest()
+            for i, b in enumerate(u):
+                acc[i] ^= b
+        derived.extend(acc)
+    return bytes(derived[:dklen])
+
+
 def hash_password(password: str, pepper: str) -> str:
     validate_password(password)
     salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", _material(password, pepper), salt, PBKDF2_ITERATIONS, dklen=32
-    )
+    digest = _pbkdf2_sha256(_material(password, pepper), salt, PBKDF2_ITERATIONS, 32)
     return "pbkdf2_sha256${}${}${}".format(
         PBKDF2_ITERATIONS,
         base64.urlsafe_b64encode(salt).decode().rstrip("="),
@@ -46,9 +71,7 @@ def verify_password(password: str, encoded: str, pepper: str) -> bool:
             return False
         salt = base64.urlsafe_b64decode(salt_b64 + "=" * (-len(salt_b64) % 4))
         expected = base64.urlsafe_b64decode(digest_b64 + "=" * (-len(digest_b64) % 4))
-        actual = hashlib.pbkdf2_hmac(
-            "sha256", _material(password, pepper), salt, int(iterations), dklen=len(expected)
-        )
+        actual = _pbkdf2_sha256(_material(password, pepper), salt, int(iterations), len(expected))
         return hmac.compare_digest(actual, expected)
     except Exception:
         return False
