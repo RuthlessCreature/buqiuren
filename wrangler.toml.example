@@ -1,0 +1,22 @@
+name = "buqiuren"
+main = "src/entry.py"
+compatibility_date = "2026-09-12"
+compatibility_flags = ["python_workers"]
+workers_dev = true
+
+[vars]
+APP_NAME = "不求人"
+MINIMAX_MODEL = "MiniMax-M3"
+MINIMAX_BASE_URL = "https://api.minimax.io/v1"
+DIVINATION_TIMEZONE = "Asia/Shanghai"
+SESSION_DAYS = "30"
+MAX_HISTORY_MESSAGES = "24"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "buqiuren-db"
+database_id = "__D1_DATABASE_ID__"
+migrations_dir = "migrations"
+
+[python_modules]
+excludes = ["**/*.pyc", "**/__pycache__", "vendor_bazi/books/**", "vendor_bazi/examples/**", "vendor_bazi/手相/**"]
