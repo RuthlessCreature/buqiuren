@@ -35,7 +35,7 @@ jobs:
           sed -i 's/__D1_DATABASE_ID__/00000000-0000-0000-0000-000000000001/g' wrangler.toml
 
       - name: Resolve Worker-compatible Python packages
-        run: uv run pywrangler sync
+        run: uv run pywrangler sync --allow-build
 
       - name: Vendor exact upstream bazi revision after pywrangler sync
         run: bash scripts/vendor_bazi.sh
