@@ -82,6 +82,11 @@ jobs:
           bash scripts/vendor_bazi.sh
           test "$(cat python_modules/buqiuren_bazi/UPSTREAM_COMMIT)" = "33b18354d5407727640e545c3aaec0efb4bf5282"
 
+      - name: Live MiniMax-M3 thinking acceptance probe
+        env:
+          PYTHONPATH: src
+        run: uv run python scripts/probe_minimax.py
+
       - name: Ensure private R2 media bucket
         shell: bash
         run: |
