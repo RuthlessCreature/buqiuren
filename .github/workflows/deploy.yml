@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -146,6 +146,7 @@ jobs:
           import json
           d=json.load(open('health.json'))
           assert d['ok'] is True
+          assert d['streaming'] is True
           assert d['bazi_engine_commit']=='33b18354d5407727640e545c3aaec0efb4bf5282'
           print('Smoke test OK:', d)
           PY
