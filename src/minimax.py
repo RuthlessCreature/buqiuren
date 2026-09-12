@@ -27,7 +27,6 @@ def _content_parts(text: str, media: list[dict[str, Any]]) -> list[dict[str, Any
     parts: list[dict[str, Any]] = []
     if text.strip():
         parts.append({"type": "text", "text": text.strip()})
-
     for item in media:
         kind = item.get("media_kind")
         url = item.get("signed_url")
@@ -36,7 +35,7 @@ def _content_parts(text: str, media: list[dict[str, Any]]) -> list[dict[str, Any
         if kind == "image":
             parts.append({"type": "image_url", "image_url": {"url": url, "detail": "high"}})
         elif kind == "video":
-            parts.append({"type": "video_url", "video_url": {"url": url, "detail": "default"}})
+            parts.append({"type": "video_url", "video_url": {"url": url, "detail": "default", "fps": 1}})
     return parts or [{"type": "text", "text": "请继续。"}]
 
 
@@ -50,14 +49,19 @@ def build_messages(system_prompt: str, case_context: str, history: list[dict[str
         if role not in ("user", "assistant"):
             continue
         content = (row.get("content") or "").strip()
-        if content:
+        old_media = row.get("attachments") or []
+        if role == "user" and old_media:
+            messages.append({"role": "user", "content": _content_parts(content, old_media)})
+        elif content:
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": _content_parts(user_text, media)})
     return messages
 
 
 async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, case_context: str, history: list[dict[str, Any]], user_text: str, media: list[dict[str, Any]], attachment_note: str, timeout_seconds: float = 180.0) -> MiniMaxResult:
-    """Call MiniMax M3 through its OpenAI-compatible Chat Completions surface."""
+    """Call MiniMax M3 through its OpenAI-compatible multimodal Chat Completions API."""
+    if not api_key:
+        raise RuntimeError("MINIMAX_API_KEY 未配置")
     endpoint = base_url.rstrip("/") + "/chat/completions"
     payload: dict[str, Any] = {
         "model": model,
@@ -67,6 +71,7 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
         "max_completion_tokens": 10000,
         "stream": False,
         "thinking": {"type": "adaptive"},
+        "reasoning_split": True,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -101,13 +106,21 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
     if not content:
         raise RuntimeError("MiniMax 返回了空回答")
 
-    reasoning = message.get("reasoning_content") or message.get("reasoning")
+    reasoning = message.get("reasoning_content") or message.get("reasoning") or message.get("reasoning_details")
     usage = data.get("usage") or {}
     return MiniMaxResult(
         content=content,
         model=str(data.get("model") or model),
         prompt_tokens=usage.get("prompt_tokens") or usage.get("input_tokens"),
         completion_tokens=usage.get("completion_tokens") or usage.get("output_tokens"),
-        reasoning=str(reasoning) if reasoning else None,
+        reasoning=json_safe_reasoning(reasoning),
         raw_usage=usage,
     )
+
+
+def json_safe_reasoning(reasoning: Any) -> str | None:
+    if reasoning is None:
+        return None
+    if isinstance(reasoning, str):
+        return reasoning
+    return str(reasoning)
