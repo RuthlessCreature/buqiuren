@@ -13,19 +13,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Vendor exact upstream bazi revision
+
+      - name: Install build tools and native test environment
+        run: |
+          npm install --global wrangler@latest
+          uv sync --all-groups
+
+      - name: Prepare local Worker configuration
+        shell: bash
+        run: |
+          cp wrangler.toml.example wrangler.toml
+          sed -i 's/__D1_DATABASE_ID__/00000000-0000-0000-0000-000000000001/g' wrangler.toml
+
+      - name: Resolve Worker-compatible Python packages
+        run: uv run pywrangler sync
+
+      - name: Vendor exact upstream bazi revision after pywrangler sync
         run: bash scripts/vendor_bazi.sh
-      - name: Install dependencies
-        run: uv sync --all-groups
+
       - name: Compile sources
         run: uv run python -m compileall -q src tests
-      - name: Run tests
+
+      - name: Run regression tests
         env:
           PYTHONPATH: src
         run: uv run pytest -q
+
+      - name: Dry-run Cloudflare Worker bundle
+        run: uv run pywrangler deploy --dry-run --outdir dist --config wrangler.toml
+
+      - name: Assert pinned bazi source is inside deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f python_modules/buqiuren_bazi/bazi.py
+          test "$(cat python_modules/buqiuren_bazi/UPSTREAM_COMMIT)" = "33b18354d5407727640e545c3aaec0efb4bf5282"
+          grep -R -q --include='*.py' 'Author: 钉钉、抖音或微信pythontesting' dist
