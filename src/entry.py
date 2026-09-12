@@ -18,6 +18,7 @@ from admin_ui import ADMIN_HTML
 from bazi_adapter import BAZI_ENGINE_COMMIT, ProfileInput, build_chart, profile_fingerprint
 from divination import auxiliary_context
 from minimax import chat as minimax_chat
+from minimax import stream_chat as minimax_stream_chat
 from prompts import attachment_instruction, build_case_context, build_system_prompt
 from security import (
     constant_time_equals,
@@ -274,7 +275,7 @@ class Default(WorkerEntrypoint):
         else:
             return _error("当前附件仅支持 JPEG/PNG/WebP/GIF 图片与 MP4/WebM/MOV 视频", 415)
         if declared <= 0 or declared > limit:
-            return _error(f"附件大小不符合限制：图片 ≤10MB，视频 ≤50MB", 413)
+            return _error("附件大小不符合限制：图片 ≤10MB，视频 ≤50MB", 413)
 
         conversation_id = None
         raw_conversation = (params.get("conversation_id") or [None])[0]
@@ -329,6 +330,7 @@ class Default(WorkerEntrypoint):
         except Exception:
             return _error("请求格式无效")
         text = str(body.get("text") or "").strip()
+        wants_stream = bool(body.get("stream"))
         attachment_ids = body.get("attachment_ids") or []
         if not isinstance(attachment_ids, list) or len(attachment_ids) > MAX_ATTACHMENTS_PER_MESSAGE:
             return _error("单次最多 8 个附件")
@@ -391,25 +393,98 @@ class Default(WorkerEntrypoint):
         await db.bind_attachments_to_message(self.env.DB, int(session["user_id"]), message_id, conversation_id, attachment_ids)
         await db.rename_conversation_if_default(self.env.DB, conversation_id, (text[:36] if text else attachments[0]["original_name"]) or "新对话")
 
-        try:
-            result = await minimax_chat(
-                api_key=_env(self.env, "MINIMAX_API_KEY"),
-                base_url=_env(self.env, "MINIMAX_BASE_URL", "https://api.minimax.io/v1"),
-                model=_env(self.env, "MINIMAX_MODEL", "MiniMax-M3"),
-                system_prompt=build_system_prompt(),
-                case_context=build_case_context(dict(profile), chart, auxiliary),
-                history=history,
-                user_text=text or "请分析本轮上传的材料。",
-                media=media,
-                attachment_note=attachment_instruction(attachments),
+        model_kwargs = {
+            "api_key": _env(self.env, "MINIMAX_API_KEY"),
+            "base_url": _env(self.env, "MINIMAX_BASE_URL", "https://api.minimaxi.com/v1"),
+            "model": _env(self.env, "MINIMAX_MODEL", "MiniMax-M3"),
+            "system_prompt": build_system_prompt(),
+            "case_context": build_case_context(dict(profile), chart, auxiliary),
+            "history": history,
+            "user_text": text or "请分析本轮上传的材料。",
+            "media": media,
+            "attachment_note": attachment_instruction(attachments),
+        }
+
+        if wants_stream:
+            from js import ReadableStream, TextEncoder
+            from pyodide.ffi import create_proxy, to_js
+
+            encoder = TextEncoder.new()
+
+            async def start(controller):
+                async def emit(payload):
+                    line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+                    controller.enqueue(encoder.encode(line))
+
+                try:
+                    await emit({"type": "start", "conversation_id": conversation_id})
+                    async for event in minimax_stream_chat(**model_kwargs):
+                        kind = event.get("type")
+                        if kind in ("reasoning", "content"):
+                            await emit({"type": kind, "delta": event.get("delta") or ""})
+                            continue
+                        if kind == "done":
+                            result = event["result"]
+                            assistant_id = await db.add_message(
+                                self.env.DB,
+                                conversation_id,
+                                int(session["user_id"]),
+                                "assistant",
+                                result.content,
+                                result.model,
+                                result.prompt_tokens,
+                                result.completion_tokens,
+                                result.reasoning,
+                            )
+                            await db.audit(
+                                self.env.DB,
+                                int(session["user_id"]),
+                                "chat.completed",
+                                "message",
+                                str(assistant_id),
+                                {"model": result.model, "attachments": len(attachments), "usage": result.raw_usage, "stream": True},
+                            )
+                            await emit({
+                                "type": "done",
+                                "message": {"id": assistant_id, "role": "assistant", "content": result.content, "reasoning": result.reasoning},
+                                "model": result.model,
+                                "usage": result.raw_usage,
+                            })
+                except Exception as exc:
+                    await db.audit(self.env.DB, int(session["user_id"]), "chat.failed", "conversation", str(conversation_id), {"error": str(exc)[:1200], "stream": True})
+                    await emit({"type": "error", "error": "模型推演失败：" + str(exc)[:500]})
+                finally:
+                    controller.close()
+
+            stream = ReadableStream.new(to_js({"start": create_proxy(start)}))
+            return Response(
+                stream,
+                headers={
+                    "Content-Type": "application/x-ndjson; charset=utf-8",
+                    "Cache-Control": "no-store, no-transform",
+                    "X-Content-Type-Options": "nosniff",
+                },
             )
+
+        try:
+            result = await minimax_chat(**model_kwargs)
         except Exception as exc:
             await db.audit(self.env.DB, int(session["user_id"]), "chat.failed", "conversation", str(conversation_id), {"error": str(exc)[:1200]})
             return _error("模型推演失败：" + str(exc)[:500], 502)
 
-        assistant_id = await db.add_message(self.env.DB, conversation_id, int(session["user_id"]), "assistant", result.content, result.model, result.prompt_tokens, result.completion_tokens)
+        assistant_id = await db.add_message(
+            self.env.DB,
+            conversation_id,
+            int(session["user_id"]),
+            "assistant",
+            result.content,
+            result.model,
+            result.prompt_tokens,
+            result.completion_tokens,
+            result.reasoning,
+        )
         await db.audit(self.env.DB, int(session["user_id"]), "chat.completed", "message", str(assistant_id), {"model": result.model, "attachments": len(attachments), "usage": result.raw_usage})
-        return _json({"message": {"id": assistant_id, "role": "assistant", "content": result.content}, "model": result.model, "usage": result.raw_usage})
+        return _json({"message": {"id": assistant_id, "role": "assistant", "content": result.content, "reasoning": result.reasoning}, "model": result.model, "usage": result.raw_usage})
 
     async def fetch(self, request):
         url = urlparse(request.url)
@@ -422,7 +497,7 @@ class Default(WorkerEntrypoint):
         if path == "/" and method == "GET":
             return _html(APP_HTML)
         if path == "/health" and method == "GET":
-            return _json({"ok": True, "service": "buqiuren", "bazi_engine_commit": BAZI_ENGINE_COMMIT, "multimodal": ["image", "video"]})
+            return _json({"ok": True, "service": "buqiuren", "bazi_engine_commit": BAZI_ENGINE_COMMIT, "multimodal": ["image", "video"], "streaming": True})
         if path == "/wotamade" and method == "GET":
             if not self._admin_ok(request):
                 return self._admin_unauthorized()
@@ -457,7 +532,10 @@ class Default(WorkerEntrypoint):
                 await db.delete_session(self.env.DB, token_hash(raw, self.pepper))
             return _json({"ok": True}, headers={"Set-Cookie": _clear_cookie()})
         if path == "/api/change-password" and method == "POST":
-            body = await request.json()
+            try:
+                body = await request.json()
+            except Exception:
+                return _error("请求格式无效")
             user = await db.get_user_by_username(self.env.DB, session["username"])
             if not verify_password(str(body.get("old_password") or ""), user.get("password_hash", ""), self.pepper):
                 return _error("当前密码不正确", 403)
