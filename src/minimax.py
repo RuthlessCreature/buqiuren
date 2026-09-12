@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 
 THINK_RE = re.compile(r"<think>.*?</think>", re.S | re.I)
 
@@ -77,7 +77,7 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "buqiuren/0.1",
+        "User-Agent": "buqiuren/0.2",
     }
     async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
         response = await client.post(endpoint, headers=headers, json=payload)
