@@ -75,7 +75,7 @@ jobs:
           echo "database_id=$DB_ID" >> "$GITHUB_OUTPUT"
 
       - name: Resolve Worker-compatible Python packages
-        run: uv run pywrangler sync
+        run: uv run pywrangler sync --allow-build
 
       - name: Vendor pinned bazi engine after package sync
         run: |
