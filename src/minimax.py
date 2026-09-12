@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx2 as httpx
 
-THINK_RE = re.compile(r"<think>.*?</think>", re.S | re.I)
+THINK_RE = re.compile(r"<think>(.*?)</think>", re.S | re.I)
 
 
 @dataclass
@@ -21,6 +21,32 @@ class MiniMaxResult:
 
 def _strip_hidden_reasoning(text: str) -> str:
     return THINK_RE.sub("", text or "").strip()
+
+
+def _embedded_reasoning(text: str) -> str | None:
+    chunks = [x.strip() for x in THINK_RE.findall(text or "") if x.strip()]
+    return "\n\n".join(chunks) if chunks else None
+
+
+def _reasoning_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("thinking") or item.get("content")
+                if text:
+                    parts.append(str(text))
+            elif item:
+                parts.append(str(item))
+        return "\n".join(parts).strip() or None
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("thinking") or value.get("content")
+        return str(text).strip() if text else str(value)
+    return str(value)
 
 
 def _content_parts(text: str, media: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -59,7 +85,13 @@ def build_messages(system_prompt: str, case_context: str, history: list[dict[str
 
 
 async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, case_context: str, history: list[dict[str, Any]], user_text: str, media: list[dict[str, Any]], attachment_note: str, timeout_seconds: float = 180.0) -> MiniMaxResult:
-    """Call MiniMax M3 through its OpenAI-compatible multimodal Chat Completions API."""
+    """Call MiniMax through the OpenAI-compatible multimodal Chat Completions API.
+
+    Thinking is mandatory for this product. reasoning_split asks MiniMax to return
+    thinking separately; the adaptive thinking hint is retained for M3 Token Plan.
+    A response without any detectable reasoning is rejected instead of silently
+    pretending that thinking was enabled.
+    """
     if not api_key:
         raise RuntimeError("MINIMAX_API_KEY 未配置")
     endpoint = base_url.rstrip("/") + "/chat/completions"
@@ -77,7 +109,7 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "buqiuren/0.2",
+        "User-Agent": "buqiuren/0.3",
     }
     async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
         response = await client.post(endpoint, headers=headers, json=payload)
@@ -102,25 +134,26 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
             if isinstance(part, dict) and part.get("type") in ("text", "output_text"):
                 fragments.append(str(part.get("text") or ""))
         content = "\n".join(fragments)
-    content = _strip_hidden_reasoning(str(content or ""))
+    raw_content = str(content or "")
+
+    reasoning = _reasoning_text(
+        message.get("reasoning_details")
+        or message.get("reasoning_content")
+        or message.get("reasoning")
+    ) or _embedded_reasoning(raw_content)
+    if not reasoning:
+        raise RuntimeError("MiniMax 本轮未返回思考内容；不求人要求 thinking 必须开启")
+
+    content = _strip_hidden_reasoning(raw_content)
     if not content:
         raise RuntimeError("MiniMax 返回了空回答")
 
-    reasoning = message.get("reasoning_content") or message.get("reasoning") or message.get("reasoning_details")
     usage = data.get("usage") or {}
     return MiniMaxResult(
         content=content,
         model=str(data.get("model") or model),
         prompt_tokens=usage.get("prompt_tokens") or usage.get("input_tokens"),
         completion_tokens=usage.get("completion_tokens") or usage.get("output_tokens"),
-        reasoning=json_safe_reasoning(reasoning),
+        reasoning=reasoning,
         raw_usage=usage,
     )
-
-
-def json_safe_reasoning(reasoning: Any) -> str | None:
-    if reasoning is None:
-        return None
-    if isinstance(reasoning, str):
-        return reasoning
-    return str(reasoning)
