@@ -1,13 +1,13 @@
 name = "buqiuren"
 main = "src/entry.py"
 compatibility_date = "2026-09-12"
-compatibility_flags = ["python_workers"]
+compatibility_flags = ["python_workers", "python_workers_314", "python_process_pth_files"]
 workers_dev = true
 
 [vars]
 APP_NAME = "不求人"
 MINIMAX_MODEL = "MiniMax-M3"
-MINIMAX_BASE_URL = "https://api.minimax.io/v1"
+MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
 DIVINATION_TIMEZONE = "Asia/Shanghai"
 SESSION_DAYS = "30"
 MAX_HISTORY_MESSAGES = "24"
@@ -23,4 +23,4 @@ binding = "MEDIA"
 bucket_name = "buqiuren-media"
 
 [python_modules]
-excludes = ["**/*.pyc", "**/__pycache__", "vendor_bazi/books/**", "vendor_bazi/examples/**", "vendor_bazi/手相/**"]
+excludes = ["**/*.pyc", "**/__pycache__", "buqiuren_bazi/books/**", "buqiuren_bazi/examples/**", "buqiuren_bazi/手相/**"]
