@@ -1,0 +1,17 @@
+[project]
+name = "buqiuren"
+version = "0.1.0"
+description = "不求人 AI 命理推演站"
+requires-python = ">=3.14"
+dependencies = [
+  "lunar-python>=1.4.8",
+  "bidict>=0.23.1",
+  "colorama>=0.4.6",
+]
+
+[dependency-groups]
+dev = [
+  "workers-py>=1.8.0",
+  "workers-runtime-sdk>=0.1.0",
+  "pytest>=8.3.0",
+]
