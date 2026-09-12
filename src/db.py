@@ -254,11 +254,21 @@ async def rename_conversation_if_default(db, conversation_id: int, title: str):
     )
 
 
-async def add_message(db, conversation_id: int, user_id: int, role: str, content: str, model: str | None = None, prompt_tokens: int | None = None, completion_tokens: int | None = None) -> int:
+async def add_message(
+    db,
+    conversation_id: int,
+    user_id: int,
+    role: str,
+    content: str,
+    model: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    reasoning: str | None = None,
+) -> int:
     result = await execute(
         db,
-        """INSERT INTO messages(conversation_id,user_id,role,content,model,prompt_tokens,completion_tokens,created_at)
-           VALUES(?,?,?,?,?,?,?,?)""",
+        """INSERT INTO messages(conversation_id,user_id,role,content,model,prompt_tokens,completion_tokens,reasoning,created_at)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
         conversation_id,
         user_id,
         role,
@@ -266,6 +276,7 @@ async def add_message(db, conversation_id: int, user_id: int, role: str, content
         model,
         prompt_tokens,
         completion_tokens,
+        reasoning,
         iso(),
     )
     await execute(db, "UPDATE conversations SET updated_at=? WHERE id=?", iso(), conversation_id)
@@ -276,7 +287,7 @@ async def add_message(db, conversation_id: int, user_id: int, role: str, content
 async def history(db, conversation_id: int, user_id: int, limit: int = 24):
     data = await rows(
         db,
-        """SELECT id,role,content,model,created_at FROM messages
+        """SELECT id,role,content,model,reasoning,created_at FROM messages
            WHERE conversation_id=? AND user_id=? ORDER BY id DESC LIMIT ?""",
         conversation_id,
         user_id,
@@ -358,7 +369,7 @@ async def admin_user_dump(db, user_id: int):
         "user": await get_user(db, user_id),
         "profile": await get_profile(db, user_id),
         "conversations": await rows(db, "SELECT * FROM conversations WHERE user_id=? ORDER BY updated_at DESC", user_id),
-        "messages": await rows(db, "SELECT id,conversation_id,role,content,model,prompt_tokens,completion_tokens,created_at FROM messages WHERE user_id=? ORDER BY id DESC LIMIT 1000", user_id),
+        "messages": await rows(db, "SELECT id,conversation_id,role,content,reasoning,model,prompt_tokens,completion_tokens,created_at FROM messages WHERE user_id=? ORDER BY id DESC LIMIT 1000", user_id),
         "attachments": await rows(db, "SELECT id,conversation_id,message_id,original_name,mime_type,media_kind,byte_size,sha256,created_at FROM attachments WHERE user_id=? ORDER BY created_at DESC", user_id),
         "chart_cache": await first(db, "SELECT user_id,profile_fingerprint,engine_commit,chart_mode,generated_at FROM chart_cache WHERE user_id=?", user_id),
         "audit": await rows(db, "SELECT * FROM audit_logs WHERE actor_user_id=? ORDER BY id DESC LIMIT 300", user_id),
