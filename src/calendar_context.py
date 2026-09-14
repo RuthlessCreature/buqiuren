@@ -58,6 +58,14 @@ def _solar_fact(solar: Solar, expression: str, source: str, assumption: str | No
     return item
 
 
+def _validated_solar(year: int, month: int, day: int) -> Solar:
+    # lunar-python's Solar constructor is intentionally permissive in a few paths;
+    # validate civil dates first so inputs such as 2026-02-31 cannot normalize into
+    # another date and silently feed the model a wrong day pillar.
+    date(year, month, day)
+    return Solar.fromYmd(year, month, day)
+
+
 def _solar_from_date(d: date) -> Solar:
     return Solar.fromYmd(d.year, d.month, d.day)
 
@@ -93,6 +101,8 @@ def resolve_calendar_context(user_text: str, now: datetime) -> dict[str, Any]:
             month = -month
         try:
             lunar = Lunar.fromYmd(year, month, day)
+            if lunar.getYear() != year or lunar.getMonth() != month or lunar.getDay() != day:
+                raise ValueError("农历日期被日历库归一化，拒绝作为精确输入")
             _append_unique(items, _solar_fact(lunar.getSolar(), expression, "explicit_lunar"))
         except Exception as exc:
             errors.append({"expression": expression, "error": f"农历日期无法解析：{exc}"})
@@ -107,7 +117,7 @@ def resolve_calendar_context(user_text: str, now: datetime) -> dict[str, Any]:
             occupied.append(match.span())
             expression = match.group(0)
             try:
-                solar = Solar.fromYmd(
+                solar = _validated_solar(
                     int(match.group("year")),
                     int(match.group("month")),
                     int(match.group("day")),
@@ -123,7 +133,7 @@ def resolve_calendar_context(user_text: str, now: datetime) -> dict[str, Any]:
         occupied.append(match.span())
         expression = match.group(0)
         try:
-            solar = Solar.fromYmd(current_date.year, int(match.group("month")), int(match.group("day")))
+            solar = _validated_solar(current_date.year, int(match.group("month")), int(match.group("day")))
             _append_unique(
                 items,
                 _solar_fact(
