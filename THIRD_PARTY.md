@@ -23,6 +23,24 @@ Do not silently track `master`. Any upstream update must be deliberate:
 
 This prevents an upstream change from silently altering production chart results.
 
+## 6tail/lunar-python
+
+- Upstream: `https://github.com/6tail/lunar-python`
+- Runtime package: `lunar-python==1.4.8`
+- License: MIT
+- Purpose: deterministic calendar/date facts for current-turn expressions such as today, yesterday, tomorrow and explicit solar/lunar dates; in particular, Gregorian/lunar conversion and the day's GanZhi.
+- Integration: `src/calendar_context.py` resolves date expressions before the LLM is called. The model receives the calculated date fact and only interprets it; it does not calculate the day pillar itself.
+
+### Update policy
+
+The runtime version is pinned. Before changing it:
+
+1. review upstream changes;
+2. run the public README fixture (`1986-05-29` = `癸酉日`);
+3. run relative-date, explicit-solar and explicit-lunar regression tests;
+4. verify the Worker bundle under Pyodide/Cloudflare;
+5. document the version change.
+
 ## Python packages
 
 Runtime dependencies are declared in `pyproject.toml` and resolved at build time. Their individual licenses remain governed by their upstream package metadata.
