@@ -49,8 +49,6 @@ def _solar_fact(solar: Solar, expression: str, source: str, assumption: str | No
         "source": source,
         "solar_date": solar.toYmd(),
         "lunar_date": lunar.toString(),
-        "year_ganzhi": lunar.getYearInGanZhi(),
-        "month_ganzhi": lunar.getMonthInGanZhi(),
         "day_ganzhi": lunar.getDayInGanZhi(),
         "engine": CALENDAR_ENGINE,
         "engine_version": CALENDAR_ENGINE_VERSION,
@@ -155,8 +153,8 @@ def resolve_calendar_context(user_text: str, now: datetime) -> dict[str, Any]:
         "dates": items,
         "errors": errors,
         "instruction": (
-            "以上日期、公农历转换及干支均由 6tail/lunar-python 程序计算。"
-            "模型只允许基于这些结果做命理推理与解释，禁止自行心算、补算或改写年/月/日干支。"
+            "以上日期、公农历转换及日干支均由 6tail/lunar-python 程序计算。"
+            "模型只允许基于这些结果做命理推理与解释，禁止自行心算、补算或改写日干支。"
             "若用户问到的日期没有出现在 dates 中，或 status=unresolved，必须说明缺少可计算的明确日期，"
             "不得凭语言模型知识猜一个干支。"
         ),
