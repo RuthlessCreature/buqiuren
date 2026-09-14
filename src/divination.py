@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+
+from calendar_context import resolve_calendar_context
 
 TRIGRAMS = {
     1: ("乾", "天", "☰"),
@@ -104,7 +105,10 @@ def method_router(user_text: str) -> dict[str, Any]:
 
 def auxiliary_context(user_text: str, now: datetime, seed: str) -> dict[str, Any]:
     route = method_router(user_text)
-    ctx: dict[str, Any] = {"route": route}
+    ctx: dict[str, Any] = {
+        "route": route,
+        "calendar": resolve_calendar_context(user_text, now),
+    }
     if route["meihua"] or route["zhouyi"]:
         ctx["meihua"] = meihua_time_hexagram(now, seed)
     if route["qimen"]:
