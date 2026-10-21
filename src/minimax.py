@@ -9,6 +9,10 @@ import httpx2 as httpx
 
 THINK_RE = re.compile(r"<think>(.*?)</think>", re.S | re.I)
 
+# Official MiniMax API model ID, released 2026-10-19.
+DEFAULT_MODEL = "MiniMax-M3.1-Flash"
+DEFAULT_REASONING_EFFORT = "max"
+
 
 @dataclass
 class MiniMaxResult:
@@ -122,13 +126,17 @@ def _payload(*, model: str, messages: list[dict[str, Any]], stream: bool) -> dic
         "messages": messages,
         "temperature": 0.82,
         "top_p": 0.95,
-        "max_completion_tokens": 10000,
+        "max_completion_tokens": 16384 if model.startswith("MiniMax-M3.1") else 10000,
         "stream": stream,
-        # M3 official OpenAI-compatible API: adaptive explicitly keeps thinking on.
-        "thinking": {"type": "adaptive"},
         # Keep thinking separate so the UI can show it independently from the answer.
         "reasoning_split": True,
     }
+    if model.startswith("MiniMax-M3.1"):
+        # M3.1 Flash always reasons; legacy thinking.type is not its thinking-depth API.
+        payload["reasoning_effort"] = DEFAULT_REASONING_EFFORT
+    elif model == "MiniMax-M3":
+        # Preserve compatibility if the older M3 is explicitly selected.
+        payload["thinking"] = {"type": "adaptive"}
     if stream:
         payload["stream_options"] = {"include_usage": True}
     return payload
@@ -194,7 +202,7 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
 
 
 async def stream_chat(*, api_key: str, base_url: str, model: str, system_prompt: str, case_context: str, history: list[dict[str, Any]], user_text: str, media: list[dict[str, Any]], attachment_note: str, timeout_seconds: float = 240.0) -> AsyncIterator[dict[str, Any]]:
-    """Stream MiniMax M3 thinking and answer as separate events.
+    """Stream MiniMax thinking and answer as separate events.
 
     Events:
       {"type": "reasoning", "delta": "..."}
