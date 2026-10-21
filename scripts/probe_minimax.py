@@ -9,7 +9,7 @@ sys.path.insert(0, "src")
 
 from bazi_adapter import ProfileInput, build_chart
 from divination import auxiliary_context
-from minimax import stream_chat
+from minimax import DEFAULT_MODEL, stream_chat
 from prompts import attachment_instruction, build_case_context, build_system_prompt
 
 
@@ -50,7 +50,7 @@ async def main() -> None:
     async for event in stream_chat(
         api_key=api_key,
         base_url="https://api.minimaxi.com/v1",
-        model="MiniMax-M3",
+        model=DEFAULT_MODEL,
         system_prompt=build_system_prompt(),
         case_context=build_case_context(profile_row, chart, auxiliary),
         history=[],
@@ -70,7 +70,7 @@ async def main() -> None:
     content = "".join(content_parts)
     if final is None:
         raise AssertionError("stream did not produce done event")
-    if final.model != "MiniMax-M3":
+    if final.model != DEFAULT_MODEL:
         raise AssertionError(f"unexpected model: {final.model}")
     if not reasoning.strip() or not final.reasoning or not final.reasoning.strip():
         raise AssertionError("streaming thinking/reasoning missing")
