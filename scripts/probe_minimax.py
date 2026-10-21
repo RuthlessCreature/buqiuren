@@ -58,6 +58,7 @@ async def main() -> None:
         media=[],
         attachment_note=attachment_instruction([]),
         timeout_seconds=180.0,
+        debug_stream_shape=True,
     ):
         if event.get("type") == "reasoning":
             reasoning_parts.append(event.get("delta") or "")
