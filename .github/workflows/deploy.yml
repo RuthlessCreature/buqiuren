@@ -16,7 +16,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_M31_API_KEY || secrets.MINIMAX_API_KEY }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       SESSION_PEPPER: ${{ secrets.SESSION_PEPPER }}
     steps:
@@ -82,7 +82,7 @@ jobs:
           bash scripts/vendor_bazi.sh
           test "$(cat python_modules/buqiuren_bazi/UPSTREAM_COMMIT)" = "33b18354d5407727640e545c3aaec0efb4bf5282"
 
-      - name: Live MiniMax-M3 thinking acceptance probe
+      - name: Live MiniMax-M3.1-Flash thinking acceptance probe
         env:
           PYTHONPATH: src
         run: uv run python scripts/probe_minimax.py
