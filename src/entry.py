@@ -17,6 +17,7 @@ import db
 from admin_ui import ADMIN_HTML
 from bazi_adapter import BAZI_ENGINE_COMMIT, ProfileInput, build_chart, profile_fingerprint
 from divination import auxiliary_context
+from minimax import DEFAULT_MODEL
 from minimax import chat as minimax_chat
 from minimax import stream_chat as minimax_stream_chat
 from prompts import attachment_instruction, build_case_context, build_system_prompt
@@ -396,7 +397,7 @@ class Default(WorkerEntrypoint):
         model_kwargs = {
             "api_key": _env(self.env, "MINIMAX_API_KEY"),
             "base_url": _env(self.env, "MINIMAX_BASE_URL", "https://api.minimaxi.com/v1"),
-            "model": _env(self.env, "MINIMAX_MODEL", "MiniMax-M3"),
+            "model": _env(self.env, "MINIMAX_MODEL", DEFAULT_MODEL),
             "system_prompt": build_system_prompt(),
             "case_context": build_case_context(dict(profile), chart, auxiliary),
             "history": history,
