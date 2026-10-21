@@ -201,7 +201,7 @@ async def chat(*, api_key: str, base_url: str, model: str, system_prompt: str, c
     )
 
 
-async def stream_chat(*, api_key: str, base_url: str, model: str, system_prompt: str, case_context: str, history: list[dict[str, Any]], user_text: str, media: list[dict[str, Any]], attachment_note: str, timeout_seconds: float = 240.0) -> AsyncIterator[dict[str, Any]]:
+async def stream_chat(*, api_key: str, base_url: str, model: str, system_prompt: str, case_context: str, history: list[dict[str, Any]], user_text: str, media: list[dict[str, Any]], attachment_note: str, timeout_seconds: float = 240.0, debug_stream_shape: bool = False) -> AsyncIterator[dict[str, Any]]:
     """Stream MiniMax thinking and answer as separate events.
 
     Events:
@@ -223,6 +223,7 @@ async def stream_chat(*, api_key: str, base_url: str, model: str, system_prompt:
     content_buffer = ""
     usage: dict[str, Any] = {}
     response_model = model
+    debug_shapes_seen: set[str] = set()
 
     async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
         async with client.stream("POST", endpoint, headers=_headers(api_key), json=payload) as response:
@@ -244,6 +245,23 @@ async def stream_chat(*, api_key: str, base_url: str, model: str, system_prompt:
                     continue
 
                 _raise_api_error(data)
+                if debug_stream_shape and len(debug_shapes_seen) < 24:
+                    # Never log message contents, prompts, tokens, or credentials.
+                    choices_debug = data.get("choices") or []
+                    first_debug = choices_debug[0] if choices_debug else {}
+                    delta_debug = first_debug.get("delta") or {}
+                    message_debug = first_debug.get("message") or {}
+                    fingerprint = json.dumps({
+                        "top": sorted(data.keys()),
+                        "choice": sorted(first_debug.keys()),
+                        "delta": sorted(delta_debug.keys()),
+                        "message": sorted(message_debug.keys()),
+                        "delta_types": {key: type(value).__name__ for key, value in delta_debug.items()},
+                        "content_think_tag": "<think>" in str(delta_debug.get("content") or ""),
+                    }, sort_keys=True)
+                    if fingerprint not in debug_shapes_seen:
+                        debug_shapes_seen.add(fingerprint)
+                        print("M31_STREAM_SHAPE " + fingerprint, flush=True)
                 response_model = str(data.get("model") or response_model)
                 if isinstance(data.get("usage"), dict) and data.get("usage"):
                     usage = data["usage"]
