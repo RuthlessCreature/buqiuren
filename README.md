@@ -1,6 +1,6 @@
 # 不求人 · AI 命理推演
 
-一个部署在 Cloudflare Workers 上的中文命理对话站。后端使用 Python Worker + D1；八字排盘在构建阶段固定拉取并执行 `china-testing/bazi`；对话模型默认使用 MiniMax M3 Token Plan。
+一个部署在 Cloudflare Workers 上的中文命理对话站。后端使用 Python Worker + D1；八字排盘在构建阶段固定拉取并执行 `china-testing/bazi`；对话模型默认使用 MiniMax M3.1 Flash（官方模型 ID：`MiniMax-M3.1-Flash`）。
 
 > 当前工程目标是“可部署、可审计、可扩展”，不是把命理计算偷偷塞进大模型提示词里瞎算。
 
@@ -11,7 +11,7 @@
 - 未完成档案时强制阻断命理对话
 - D1 持久化用户、档案、会话、消息、命盘缓存、审计日志
 - `china-testing/bazi` 固定版本排盘；未知时辰进入“三柱约束模式”，不伪造时柱
-- MiniMax M3 多轮对话，带完整命盘上下文与高约束系统提示词
+- MiniMax M3.1 Flash 多轮对话、流式 thinking/正文分离，带完整命盘上下文与高约束系统提示词
 - 梅花/周易辅助起卦上下文；奇门、紫微等由方法路由器按问题启用
 - 隐藏后台 `/wotamade`：查看用户档案、会话、消息与审计数据（不会暴露密码哈希、会话令牌或任何平台 Secret）
 - GitHub Actions 自动拉取指定版本 bazi、初始化/迁移 D1、注入 Cloudflare Secrets、部署 Worker
@@ -22,7 +22,8 @@
 
 - `CLOUDFLARE_API_TOKEN`：具备 Workers Scripts、D1 写权限
 - `CLOUDFLARE_ACCOUNT_ID`
-- `MINIMAX_API_KEY`：Token Plan 的 `sk-cp...` Key
+- `MINIMAX_API_KEY`：具备 `MiniMax-M3.1-Flash` 调用权限的 MiniMax API Key（原有凭据可保留）
+- `MINIMAX_M31_API_KEY`（可选）：M3.1 专用 API Key；配置后部署工作流优先采用它，便于与旧 M3 凭据分开。请确保其所属套餐/余额支持 M3.1 Flash
 - `ADMIN_PASSWORD`：`/wotamade` 后台口令
 - `SESSION_PEPPER`：至少 32 字节随机字符串，用于会话与认证派生
 
@@ -42,10 +43,12 @@ uv run pywrangler dev
 
 普通变量见 `wrangler.toml.example`：
 
-- `MINIMAX_MODEL=MiniMax-M3`
-- `MINIMAX_BASE_URL=https://api.minimax.io/v1`
+- `MINIMAX_MODEL=MiniMax-M3.1-Flash`
+- `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`
 - `DIVINATION_TIMEZONE=Asia/Shanghai`
 - `APP_NAME=不求人`
+
+默认请求使用 `reasoning_effort=max`（M3.1 Flash 的 thinking 始终开启），且 `reasoning_split=true` 保留独立思考流。只有显式切回 `MiniMax-M3` 时才使用原来的 `thinking.type=adaptive`。部署前会调用真实 M3.1 模型进行验收，权限不足会使部署停止，从而避免线上静默回退。
 
 敏感项只通过 `wrangler secret put` 注入，不写入源码。
 
